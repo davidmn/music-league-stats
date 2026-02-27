@@ -177,7 +177,7 @@
         position: sticky;
         top: 0;
         z-index: 1;
-        background: linear-gradient(180deg, #020617, #020617);
+        background: linear-gradient(180deg, rgba(15,23,42,0.96), rgba(15,23,42,0.96));
       }
 
       table.matrix th,
@@ -193,7 +193,7 @@
         position: sticky;
         left: 0;
         z-index: 2;
-        background: rgba(15,23,42,0.98);
+        background: rgba(15,23,42,0.96);
         max-width: 170px;
         width: 170px;
         overflow: hidden;
@@ -202,10 +202,8 @@
       }
 
       table.matrix th {
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.14em;
-        color: rgba(148,163,184,0.96);
+        font-size: 0.76rem;
+        color: rgba(209,213,219,0.96);
         border-bottom: 1px solid rgba(31,41,55,0.9);
       }
 
@@ -272,6 +270,12 @@
       .muted {
         color: rgba(156,163,175,0.9);
       }
+      .matrix-caption {
+        margin-top: 12px;
+        font-size: 0.9rem;
+        color: rgba(156,163,175,0.9);
+        line-height: 1.5;
+      }
 
       footer {
         margin-top: 20px;
@@ -284,17 +288,15 @@
     <main class="page">
       <header>
         <h1>Vote Stats</h1>
-        <p>
-          <strong>Generosity</strong> here is defined as the
-          <strong>average points each voter gives out per track they rate</strong>.
-          High averages mean someone tends to hand out bigger scores rather than spreading them out.
-        </p>
       </header>
 
       <section class="card">
         <div class="card-inner">
-          <h2>League generosity</h2>
+          <h2>Vote Generosity</h2>
           <div class="chart-container" id="generosity-chart"></div>
+          <p class="matrix-caption">
+            Generosity the average points each voter gives out per track they rate with positive votes. High averages mean someone tends to hand out bigger scores rather than spreading them out.
+          </p>
         </div>
       </section>
 
@@ -302,6 +304,11 @@
         <div class="card-inner">
           <h2>Vote Distribution</h2>
           <div class="table-wrapper" id="vote-matrix"></div>
+          <p class="matrix-caption">
+            Rows (left column) = voter (the person giving points).
+            Column headers (top row) = receiver (the person who submitted the track).
+            Cell at (row, column) = total points the row person gave to the column person's tracks (sum of all positive points across rounds).
+          </p>
         </div>
       </section>
     </main>
