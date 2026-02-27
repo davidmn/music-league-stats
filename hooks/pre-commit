@@ -7,3 +7,4 @@ python3 -m pytest test_generate.py -q
 echo "Running generate.py..."
 python3 generate.py
 echo "Pre-commit checks passed."
+ 
