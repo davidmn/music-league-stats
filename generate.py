@@ -344,10 +344,20 @@ def build_html(
         border: 1px solid rgba(31,41,55,0.9);
         background:
           linear-gradient(180deg, rgba(15,23,42,0.96), rgba(15,23,42,0.96));
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }}
+
+      .matrix-scroll {{
+        display: block;
+        width: 100%;
+        min-width: max-content;
       }}
 
       table.matrix {{
         width: 100%;
+        min-width: max-content;
         border-collapse: collapse;
         font-size: 0.75rem;
       }}
@@ -584,6 +594,9 @@ def build_html(
           return;
         }}
 
+        const scrollDiv = document.createElement("div");
+        scrollDiv.className = "matrix-scroll";
+
         const table = document.createElement("table");
         table.className = "matrix";
 
@@ -654,7 +667,8 @@ def build_html(
         }});
 
         table.appendChild(tbody);
-        container.appendChild(table);
+        scrollDiv.appendChild(table);
+        container.appendChild(scrollDiv);
       }}
 
       renderChart();
