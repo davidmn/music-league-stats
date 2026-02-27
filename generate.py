@@ -456,10 +456,23 @@ def build_html(
         line-height: 1.5;
       }}
 
-      footer {{
-        margin-top: 20px;
-        font-size: 0.75rem;
+      .page-footer {{
+        margin-top: 28px;
+        font-size: 0.85rem;
+        text-align: center;
+      }}
+      .page-footer .credit {{
+        display: block;
+        margin-top: 4px;
+        color: rgba(148,163,184,0.8);
+      }}
+      .page-footer a {{
         color: rgba(148,163,184,0.9);
+        text-decoration: none;
+      }}
+      .page-footer a:hover {{
+        color: rgba(209,213,219,0.96);
+        text-decoration: underline;
       }}
     </style>
   </head>
@@ -474,7 +487,7 @@ def build_html(
           <h2>Vote Generosity</h2>
           <div class="chart-container" id="generosity-chart"></div>
           <p class="matrix-caption">
-            Generosity the average points each voter gives out per track they rate with positive votes. High averages mean someone tends to hand out bigger scores rather than spreading them out.
+            Generosity is the average points each voter gives out per track they rate with positive votes. High averages mean someone tends to hand out bigger scores rather than spreading them out.
           </p>
         </div>
       </section>
@@ -490,6 +503,11 @@ def build_html(
           </p>
         </div>
       </section>
+
+      <footer class="page-footer">
+        <a href="https://github.com/davidmn/music-league-stats" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <span class="credit">Made by MegaSlippers</span>
+      </footer>
     </main>
 
     <script>
