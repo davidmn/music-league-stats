@@ -101,8 +101,8 @@ def build_vote_matrix(
     votes_path: Path, submissions_path: Path, competitors: Dict[str, str]
 ) -> tuple[List[str], List[List[int]]]:
     """
-    Build a matrix of how many positive votes each competitor has given to
-    every other competitor.
+    Build a matrix of total points each competitor has given to every other
+    competitor (sum of points from positive votes only).
     """
     submission_map = _load_submission_map(submissions_path)
 
@@ -137,7 +137,7 @@ def build_vote_matrix(
             if giver_idx is None or receiver_idx is None:
                 continue
 
-            matrix[giver_idx][receiver_idx] += 1
+            matrix[giver_idx][receiver_idx] += points
 
     return names, matrix
 
@@ -339,8 +339,6 @@ def build_html(
       }}
 
       .table-wrapper {{
-        max-height: 460px;
-        overflow: auto;
         margin-top: 8px;
         border-radius: 12px;
         border: 1px solid rgba(31,41,55,0.9);
@@ -410,6 +408,11 @@ def build_html(
 
       table.matrix td.nonzero {{
         font-weight: 500;
+      }}
+
+      table.matrix td.diagonal-cell {{
+        background: #000 !important;
+        color: rgba(148,163,184,0.96);
       }}
 
       .rank-pill {{
@@ -602,9 +605,11 @@ def build_html(
           matrixNames.forEach((_, colIdx) => {{
             const td = document.createElement("td");
             const value = rowData[colIdx] ?? 0;
-            td.textContent = String(value);
+            td.textContent = rowIdx === colIdx ? "–" : String(value);
 
-            if (range > 0) {{
+            if (rowIdx === colIdx) {{
+              td.classList.add("matrix-cell", "diagonal-cell");
+            }} else if (range > 0) {{
               const t = (value - minCell) / range; // 0 = min (yellow), 1 = max (blue)
               const r = Math.round(251 + (56 - 251) * t);
               const g = Math.round(191 + (189 - 191) * t);

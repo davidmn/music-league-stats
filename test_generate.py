@@ -166,8 +166,8 @@ def test_build_vote_matrix_orders_by_name_ignoring_emoji(tmp_path):
     names, matrix = generate.build_vote_matrix(votes_csv, submissions_csv, competitors)
     # Order should be Alice, Bee (emoji stripped for sort)
     assert names == ["Alice", "Bee \U0001F41D"]
-    # Bee (row 1) gave one positive vote to Alice's track (col 0); matrix counts votes not points
-    assert matrix[1][0] == 1
+    # Bee (row 1) gave 3 points to Alice's track (col 0); matrix stores total points
+    assert matrix[1][0] == 3
     assert matrix[0][0] == 0
     assert matrix[0][1] == 0
     assert matrix[1][1] == 0
