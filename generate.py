@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from collections import defaultdict
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -10,6 +11,25 @@ from typing import Dict, List
 
 BASE_DIR = Path(__file__).parent
 INPUT_DIR = BASE_DIR / "input" / "rf"
+
+# Strip emoji for sort keys (common Unicode blocks for symbols/pictographs/emoji).
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001F9FF"  # Misc Symbols and Pictographs, etc.
+    "\U0001F600-\U0001F64F"  # Emoticons
+    "\U0001F680-\U0001F6FF"  # Transport and Map
+    "\U0001F1E0-\U0001F1FF"  # Flags
+    "\u2600-\u26FF"  # Misc symbols
+    "\u2700-\u27BF"  # Dingbats
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def _name_sort_key(name: str) -> str:
+    """Normalise name for sorting: lowercase, no emoji."""
+    cleaned = _EMOJI_PATTERN.sub("", name).strip().lower()
+    return cleaned or name.lower()
 
 
 @dataclass
@@ -64,7 +84,69 @@ def load_voter_stats(votes_path: Path, competitors: Dict[str, str]) -> List[Vote
     return list(stats_map.values())
 
 
-def build_html(voters: List[VoterStats]) -> str:
+def _load_submission_map(path: Path) -> Dict[tuple[str, str], str]:
+    """Map (round_id, spotify_uri) -> submitter_id."""
+    submission_map: Dict[tuple[str, str], str] = {}
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            round_id = row["Round ID"]
+            uri = row["Spotify URI"]
+            submitter = row["Submitter ID"]
+            submission_map[(round_id, uri)] = submitter
+    return submission_map
+
+
+def build_vote_matrix(
+    votes_path: Path, submissions_path: Path, competitors: Dict[str, str]
+) -> tuple[List[str], List[List[int]]]:
+    """
+    Build a matrix of how many positive votes each competitor has given to
+    every other competitor.
+    """
+    submission_map = _load_submission_map(submissions_path)
+
+    # Use a stable, human-friendly ordering by competitor name.
+    competitor_ids = sorted(competitors.keys(), key=lambda cid: _name_sort_key(competitors[cid]))
+    names = [competitors[cid] for cid in competitor_ids]
+
+    index_for: Dict[str, int] = {cid: idx for idx, cid in enumerate(competitor_ids)}
+    size = len(competitor_ids)
+    matrix: List[List[int]] = [[0 for _ in range(size)] for _ in range(size)]
+
+    with votes_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            voter_id = row["Voter ID"]
+            points = int(row["Points Assigned"])
+            round_id = row["Round ID"]
+            uri = row["Spotify URI"]
+
+            if points <= 0:
+                continue
+
+            submitter_id = submission_map.get((round_id, uri))
+            if submitter_id is None:
+                continue
+
+            if voter_id == submitter_id:
+                continue
+
+            giver_idx = index_for.get(voter_id)
+            receiver_idx = index_for.get(submitter_id)
+            if giver_idx is None or receiver_idx is None:
+                continue
+
+            matrix[giver_idx][receiver_idx] += 1
+
+    return names, matrix
+
+
+def build_html(
+    voters: List[VoterStats],
+    matrix_names: List[str] | None = None,
+    matrix: List[List[int]] | None = None,
+) -> str:
     # Sort most generous first by average points per vote, then by total points.
     voters_sorted = sorted(
         voters,
@@ -89,12 +171,17 @@ def build_html(voters: List[VoterStats]) -> str:
             }
         )
 
-    # Minimal, self-contained HTML with Chart.js from CDN.
+    if matrix_names is None:
+        matrix_names = []
+    if matrix is None:
+        matrix = []
+
+    # Minimal, self-contained HTML.
     html = f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Music League – Voter Generosity</title>
+    <title>Music League – Voter Stats</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
       :root {{
@@ -126,7 +213,7 @@ def build_html(voters: List[VoterStats]) -> str:
       }}
 
       .page {{
-        max-width: 1080px;
+        max-width: 2000px;
         margin: 0 auto;
         padding: 32px 20px 40px;
       }}
@@ -247,6 +334,84 @@ def build_html(voters: List[VoterStats]) -> str:
         color: rgba(156,163,175,0.96);
       }}
 
+      .matrix-card {{
+        margin-top: 22px;
+      }}
+
+      .table-wrapper {{
+        max-height: 460px;
+        overflow: auto;
+        margin-top: 8px;
+        border-radius: 12px;
+        border: 1px solid rgba(31,41,55,0.9);
+        background:
+          linear-gradient(180deg, rgba(15,23,42,0.96), rgba(15,23,42,0.96));
+      }}
+
+      table.matrix {{
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.75rem;
+      }}
+
+      table.matrix thead {{
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: linear-gradient(180deg, #020617, #020617);
+      }}
+
+      table.matrix th,
+      table.matrix td {{
+        padding: 5px 7px;
+        text-align: center;
+        white-space: nowrap;
+      }}
+
+      table.matrix th:first-child,
+      table.matrix td:first-child {{
+        text-align: left;
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: rgba(15,23,42,0.98);
+        max-width: 170px;
+        width: 170px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }}
+
+      table.matrix th {{
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: rgba(148,163,184,0.96);
+        border-bottom: 1px solid rgba(31,41,55,0.9);
+      }}
+
+      table.matrix tbody td {{
+        font-variant-numeric: tabular-nums;
+        color: rgba(148,163,184,0.96);
+        border-bottom: 1px solid rgba(17,24,39,0.6);
+      }}
+
+      table.matrix tbody tr:nth-child(odd) td {{
+        background: rgba(15,23,42,0.96);
+      }}
+
+      table.matrix tbody tr:nth-child(even) td {{
+        background: rgba(15,23,42,0.9);
+      }}
+
+      table.matrix td.matrix-cell {{
+        color: #fefce8;
+      }}
+
+      table.matrix td.nonzero {{
+        font-weight: 500;
+      }}
+
       .rank-pill {{
         display: inline-flex;
         min-width: 1.7em;
@@ -294,7 +459,7 @@ def build_html(voters: List[VoterStats]) -> str:
   <body>
     <main class="page">
       <header>
-        <h1>Voter Generosity</h1>
+        <h1>Vote Stats</h1>
         <p>
           <strong>Generosity</strong> here is defined as the
           <strong>average points each voter gives out per track they rate</strong>.
@@ -308,12 +473,21 @@ def build_html(voters: List[VoterStats]) -> str:
           <div class="chart-container" id="generosity-chart"></div>
         </div>
       </section>
+
+      <section class="card matrix-card">
+        <div class="card-inner">
+          <h2>Vote Distribution</h2>
+          <div class="table-wrapper" id="vote-matrix"></div>
+        </div>
+      </section>
     </main>
 
     <script>
       const chartLabels = {json.dumps(chart_labels)};
       const chartValues = {json.dumps(chart_values)};
       const voters = {json.dumps(table_rows)};
+      const matrixNames = {json.dumps(matrix_names)};
+      const matrix = {json.dumps(matrix)};
 
       function renderChart() {{
         const container = document.getElementById("generosity-chart");
@@ -362,7 +536,99 @@ def build_html(voters: List[VoterStats]) -> str:
         }});
       }}
 
+      function truncName(name, max) {{
+        if (!name) return "";
+        if (name.length <= max) return name;
+        return name.slice(0, max - 1) + "…";
+      }}
+
+      function renderMatrix() {{
+        const container = document.getElementById("vote-matrix");
+        if (!container) return;
+
+        container.innerHTML = "";
+
+        if (!matrixNames.length) {{
+          const empty = document.createElement("div");
+          empty.className = "muted";
+          empty.textContent = "No vote data available.";
+          container.appendChild(empty);
+          return;
+        }}
+
+        const table = document.createElement("table");
+        table.className = "matrix";
+
+        // Find global min/max to normalise the colour scale (yellow at min, blue at max).
+        let minCell = 0;
+        let maxCell = 0;
+        let seen = false;
+        matrix.forEach((row) => {{
+          (row || []).forEach((val) => {{
+            if (!seen) {{ minCell = val; maxCell = val; seen = true; }}
+            else {{ if (val < minCell) minCell = val; if (val > maxCell) maxCell = val; }}
+          }});
+        }});
+        const range = maxCell - minCell;
+
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+
+        const corner = document.createElement("th");
+        corner.textContent = "";
+        headRow.appendChild(corner);
+
+        matrixNames.forEach((name) => {{
+          const th = document.createElement("th");
+          th.textContent = truncName(name, 8);
+          th.title = name;
+          headRow.appendChild(th);
+        }});
+
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+
+        matrixNames.forEach((giverName, rowIdx) => {{
+          const tr = document.createElement("tr");
+
+          const rowHeader = document.createElement("th");
+          rowHeader.textContent = truncName(giverName, 22);
+          rowHeader.title = giverName;
+          tr.appendChild(rowHeader);
+
+          const rowData = matrix[rowIdx] || [];
+          matrixNames.forEach((_, colIdx) => {{
+            const td = document.createElement("td");
+            const value = rowData[colIdx] ?? 0;
+            td.textContent = String(value);
+
+            if (range > 0) {{
+              const t = (value - minCell) / range; // 0 = min (yellow), 1 = max (blue)
+              const r = Math.round(251 + (56 - 251) * t);
+              const g = Math.round(191 + (189 - 191) * t);
+              const b = Math.round(36 + (248 - 36) * t);
+              const alpha = 0.45 + 0.5 * t;
+              td.classList.add("matrix-cell");
+              td.style.backgroundColor = `rgba(${{r}}, ${{g}}, ${{b}}, ${{alpha.toFixed(2)}})`;
+              if (value > 0) td.classList.add("nonzero");
+            }} else if (value > 0) {{
+              td.classList.add("nonzero");
+            }}
+
+            tr.appendChild(td);
+          }});
+
+          tbody.appendChild(tr);
+        }});
+
+        table.appendChild(tbody);
+        container.appendChild(table);
+      }}
+
       renderChart();
+      renderMatrix();
     </script>
   </body>
 </html>
@@ -373,11 +639,13 @@ def build_html(voters: List[VoterStats]) -> str:
 def main() -> None:
     competitors_csv = INPUT_DIR / "competitors.csv"
     votes_csv = INPUT_DIR / "votes.csv"
+    submissions_csv = INPUT_DIR / "submissions.csv"
 
     competitors = load_competitors(competitors_csv)
     voter_stats = load_voter_stats(votes_csv, competitors)
+    matrix_names, matrix = build_vote_matrix(votes_csv, submissions_csv, competitors)
 
-    html = build_html(voter_stats)
+    html = build_html(voter_stats, matrix_names, matrix)
     output_path = BASE_DIR / "index.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"Wrote {output_path.relative_to(BASE_DIR)} with {len(voter_stats)} voters.")
