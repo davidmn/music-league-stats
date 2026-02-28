@@ -142,10 +142,109 @@ def build_vote_matrix(
     return names, matrix
 
 
+def build_top_tracks(
+    votes_path: Path,
+    submissions_path: Path,
+    rounds_path: Path,
+    competitors: Dict[str, str],
+    top_n: int = 3,
+) -> List[dict]:
+    """
+    Return top N tracks by total points received. Each item: title, artist, submitter_name, round_name, points.
+    """
+    submission_map = _load_submission_map(submissions_path)
+    # (round_id, uri) -> total points
+    track_points: Dict[tuple[str, str], int] = defaultdict(int)
+    with votes_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            round_id = row["Round ID"]
+            uri = row["Spotify URI"]
+            points = int(row["Points Assigned"])
+            track_points[(round_id, uri)] += points
+
+    # Build list of tracks with metadata from submissions
+    round_names: Dict[str, str] = {}
+    if rounds_path.exists():
+        for rid, rname in load_rounds(rounds_path):
+            round_names[rid] = rname
+
+    tracks: List[dict] = []
+    with submissions_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            round_id = row["Round ID"]
+            uri = row["Spotify URI"]
+            key = (round_id, uri)
+            pts = track_points.get(key, 0)
+            submitter_name = competitors.get(row["Submitter ID"], row["Submitter ID"])
+            round_name = round_names.get(round_id, "Round")
+            tracks.append(
+                {
+                    "title": row["Title"],
+                    "artist": row["Artist(s)"],
+                    "submitter_name": submitter_name,
+                    "round_name": round_name,
+                    "points": pts,
+                }
+            )
+
+    tracks.sort(key=lambda t: t["points"], reverse=True)
+    return tracks[:top_n]
+
+
+def build_top_artists(
+    votes_path: Path,
+    submissions_path: Path,
+    top_n: int = 3,
+) -> List[dict]:
+    """
+    Return top N artists by total points received by their tracks. Each item: artist, points.
+    """
+    track_points: Dict[tuple[str, str], int] = defaultdict(int)
+    with votes_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            round_id = row["Round ID"]
+            uri = row["Spotify URI"]
+            points = int(row["Points Assigned"])
+            track_points[(round_id, uri)] += points
+
+    artist_points: Dict[str, int] = defaultdict(int)
+    with submissions_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            round_id = row["Round ID"]
+            uri = row["Spotify URI"]
+            artist = row["Artist(s)"]
+            pts = track_points.get((round_id, uri), 0)
+            artist_points[artist] += pts
+
+    sorted_artists = sorted(
+        artist_points.items(),
+        key=lambda x: x[1],
+        reverse=True,
+    )
+    return [{"artist": a, "points": p} for a, p in sorted_artists[:top_n]]
+
+
+def load_rounds(path: Path) -> List[tuple[str, str]]:
+    """Return list of (round_id, round_name) sorted by Created."""
+    rows: List[tuple[str, str, str]] = []
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append((row["ID"], row["Name"], row["Created"]))
+    rows.sort(key=lambda r: r[2])
+    return [(r[0], r[1]) for r in rows]
+
+
 def build_html(
     voters: List[VoterStats],
     matrix_names: List[str] | None = None,
     matrix: List[List[int]] | None = None,
+    top_tracks: List[dict] | None = None,
+    top_artists: List[dict] | None = None,
 ) -> str:
     # Sort most generous first by average points per vote, then by total points.
     voters_sorted = sorted(
@@ -175,6 +274,10 @@ def build_html(
         matrix_names = []
     if matrix is None:
         matrix = []
+    if top_tracks is None:
+        top_tracks = []
+    if top_artists is None:
+        top_artists = []
 
     # Minimal, self-contained HTML.
     html = f"""<!doctype html>
@@ -252,6 +355,9 @@ def build_html(
         padding: 18px 18px 16px;
         position: relative;
         overflow: hidden;
+      }}
+      .card + .card {{
+        margin-top: 22px;
       }}
 
       .card::before {{
@@ -335,10 +441,6 @@ def build_html(
       .bar-value {{
         font-variant-numeric: tabular-nums;
         color: rgba(156,163,175,0.96);
-      }}
-
-      .matrix-card {{
-        margin-top: 22px;
       }}
 
       .table-wrapper {{
@@ -469,6 +571,33 @@ def build_html(
         line-height: 1.5;
       }}
 
+      .top-tracks-list {{
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }}
+      .top-track-item {{
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(31,41,55,0.9);
+        font-size: 0.9rem;
+      }}
+      .top-track-item:last-child {{
+        border-bottom: none;
+      }}
+      .top-track-title {{
+        color: rgba(209,213,219,0.96);
+        font-weight: 500;
+      }}
+      .top-track-meta {{
+        color: rgba(156,163,175,0.9);
+        font-size: 0.85rem;
+        margin-top: 4px;
+      }}
+      .top-track-points {{
+        font-variant-numeric: tabular-nums;
+        color: rgba(251,191,36,0.95);
+      }}
+
       .page-footer {{
         margin-top: 28px;
         font-size: 0.85rem;
@@ -505,6 +634,26 @@ def build_html(
         </div>
       </section>
 
+      <section class="card">
+        <div class="card-inner">
+          <h2>Top 3 Tracks</h2>
+          <div id="top-tracks"></div>
+          <p class="matrix-caption">
+            Tracks with the most points across all rounds.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-inner">
+          <h2>Top 3 Artists</h2>
+          <div id="top-artists"></div>
+          <p class="matrix-caption">
+            Artists whose tracks received the most points across all rounds.
+          </p>
+        </div>
+      </section>
+
       <section class="card matrix-card">
         <div class="card-inner">
           <h2>Vote Distribution</h2>
@@ -529,6 +678,8 @@ def build_html(
       const voters = {json.dumps(table_rows)};
       const matrixNames = {json.dumps(matrix_names)};
       const matrix = {json.dumps(matrix)};
+      const topTracks = {json.dumps(top_tracks)};
+      const topArtists = {json.dumps(top_artists)};
 
       function renderChart() {{
         const container = document.getElementById("generosity-chart");
@@ -581,6 +732,77 @@ def build_html(
         if (!name) return "";
         if (name.length <= max) return name;
         return name.slice(0, max - 1) + "…";
+      }}
+
+      function renderTopTracks() {{
+        const container = document.getElementById("top-tracks");
+        if (!container) return;
+
+        container.innerHTML = "";
+
+        if (!topTracks.length) {{
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No track data available.";
+          container.appendChild(empty);
+          return;
+        }}
+
+        const ul = document.createElement("ul");
+        ul.className = "top-tracks-list";
+        topTracks.forEach(function(t, idx) {{
+          const li = document.createElement("li");
+          li.className = "top-track-item";
+          const title = document.createElement("div");
+          title.className = "top-track-title";
+          title.textContent = (idx + 1) + ". " + t.title;
+          const meta = document.createElement("div");
+          meta.className = "top-track-meta";
+          meta.textContent = t.artist + " · " + t.round_name + " · submitted by " + t.submitter_name + " · ";
+          const pts = document.createElement("span");
+          pts.className = "top-track-points";
+          pts.textContent = t.points + " pts";
+          meta.appendChild(pts);
+          li.appendChild(title);
+          li.appendChild(meta);
+          ul.appendChild(li);
+        }});
+        container.appendChild(ul);
+      }}
+
+      function renderTopArtists() {{
+        const container = document.getElementById("top-artists");
+        if (!container) return;
+
+        container.innerHTML = "";
+
+        if (!topArtists.length) {{
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No artist data available.";
+          container.appendChild(empty);
+          return;
+        }}
+
+        const ul = document.createElement("ul");
+        ul.className = "top-tracks-list";
+        topArtists.forEach(function(t, idx) {{
+          const li = document.createElement("li");
+          li.className = "top-track-item";
+          const title = document.createElement("div");
+          title.className = "top-track-title";
+          title.textContent = (idx + 1) + ". " + t.artist;
+          const meta = document.createElement("div");
+          meta.className = "top-track-meta";
+          const pts = document.createElement("span");
+          pts.className = "top-track-points";
+          pts.textContent = t.points + " pts";
+          meta.appendChild(pts);
+          li.appendChild(title);
+          li.appendChild(meta);
+          ul.appendChild(li);
+        }});
+        container.appendChild(ul);
       }}
 
       function renderMatrix() {{
@@ -675,6 +897,8 @@ def build_html(
       }}
 
       renderChart();
+      renderTopTracks();
+      renderTopArtists();
       renderMatrix();
     </script>
   </body>
@@ -687,12 +911,21 @@ def main() -> None:
     competitors_csv = INPUT_DIR / "competitors.csv"
     votes_csv = INPUT_DIR / "votes.csv"
     submissions_csv = INPUT_DIR / "submissions.csv"
+    rounds_csv = INPUT_DIR / "rounds.csv"
 
     competitors = load_competitors(competitors_csv)
     voter_stats = load_voter_stats(votes_csv, competitors)
     matrix_names, matrix = build_vote_matrix(votes_csv, submissions_csv, competitors)
+    top_tracks = build_top_tracks(votes_csv, submissions_csv, rounds_csv, competitors, top_n=3)
+    top_artists = build_top_artists(votes_csv, submissions_csv, top_n=3)
 
-    html = build_html(voter_stats, matrix_names, matrix)
+    html = build_html(
+        voter_stats,
+        matrix_names,
+        matrix,
+        top_tracks=top_tracks,
+        top_artists=top_artists,
+    )
     output_path = BASE_DIR / "index.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"Wrote {output_path.relative_to(BASE_DIR)} with {len(voter_stats)} voters.")

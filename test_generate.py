@@ -219,6 +219,252 @@ def test_build_vote_matrix_ignores_zero_points(tmp_path):
     assert matrix[1][0] == 0
 
 
+# --- build_top_tracks ---
+
+
+def test_build_top_tracks_returns_top_n_by_points(tmp_path):
+    competitors = {"id_a": "Alice", "id_b": "Bob"}
+    rounds_csv = write_csv(
+        tmp_path,
+        "rounds.csv",
+        """
+        ID,Created,Name,Description,Playlist URL
+        r1,2026-02-10T00:00:00Z,Round One,,https://example.com/1
+        """,
+    )
+    submissions_csv = write_csv(
+        tmp_path,
+        "submissions.csv",
+        """
+        Spotify URI,Title,Album,Artist(s),Submitter ID,Created,Comment,Round ID,Visible To Voters
+        spotify:track:1,Hit Song,Album A,Artist A,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        spotify:track:2,Okay Song,Album B,Artist B,id_b,2026-02-10T00:00:00Z,,r1,Yes
+        spotify:track:3,Low Song,Album C,Artist C,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        """,
+    )
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        spotify:track:1,id_b,2026-02-10T00:00:00Z,10,,r1
+        spotify:track:1,id_a,2026-02-10T00:00:00Z,5,,r1
+        spotify:track:2,id_a,2026-02-10T00:00:00Z,8,,r1
+        spotify:track:3,id_b,2026-02-10T00:00:00Z,1,,r1
+        """,
+    )
+
+    result = generate.build_top_tracks(
+        votes_csv, submissions_csv, rounds_csv, competitors, top_n=3
+    )
+
+    assert len(result) == 3
+    assert result[0]["title"] == "Hit Song"
+    assert result[0]["points"] == 15
+    assert result[0]["artist"] == "Artist A"
+    assert result[0]["submitter_name"] == "Alice"
+    assert result[0]["round_name"] == "Round One"
+
+    assert result[1]["title"] == "Okay Song"
+    assert result[1]["points"] == 8
+
+    assert result[2]["title"] == "Low Song"
+    assert result[2]["points"] == 1
+
+
+def test_build_top_tracks_respects_top_n(tmp_path):
+    competitors = {"id_a": "Alice"}
+    rounds_csv = write_csv(tmp_path, "rounds.csv", "ID,Created,Name,Description,Playlist URL\n")
+    submissions_csv = write_csv(
+        tmp_path,
+        "submissions.csv",
+        """
+        Spotify URI,Title,Album,Artist(s),Submitter ID,Created,Comment,Round ID,Visible To Voters
+        spotify:track:1,First,Album,Artist,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        spotify:track:2,Second,Album,Artist,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        spotify:track:3,Third,Album,Artist,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        """,
+    )
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        spotify:track:1,id_a,2026-02-10T00:00:00Z,5,,r1
+        spotify:track:2,id_a,2026-02-10T00:00:00Z,3,,r1
+        spotify:track:3,id_a,2026-02-10T00:00:00Z,1,,r1
+        """,
+    )
+
+    result = generate.build_top_tracks(
+        votes_csv, submissions_csv, rounds_csv, competitors, top_n=2
+    )
+
+    assert len(result) == 2
+    assert result[0]["title"] == "First"
+    assert result[1]["title"] == "Second"
+
+
+def test_build_top_tracks_unknown_submitter_uses_id(tmp_path):
+    competitors = {"id_a": "Alice"}
+    rounds_csv = write_csv(tmp_path, "rounds.csv", "ID,Created,Name,Description,Playlist URL\n")
+    submissions_csv = write_csv(
+        tmp_path,
+        "submissions.csv",
+        """
+        Spotify URI,Title,Album,Artist(s),Submitter ID,Created,Comment,Round ID,Visible To Voters
+        spotify:track:1,Title,Album,Artist,unknown_id,2026-02-10T00:00:00Z,,r1,Yes
+        """,
+    )
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        spotify:track:1,id_a,2026-02-10T00:00:00Z,4,,r1
+        """,
+    )
+
+    result = generate.build_top_tracks(
+        votes_csv, submissions_csv, rounds_csv, competitors, top_n=3
+    )
+
+    assert len(result) == 1
+    assert result[0]["submitter_name"] == "unknown_id"
+
+
+def test_build_top_tracks_missing_rounds_uses_round_label(tmp_path):
+    competitors = {"id_a": "Alice"}
+    rounds_path = tmp_path / "rounds.csv"  # do not create
+    submissions_csv = write_csv(
+        tmp_path,
+        "submissions.csv",
+        """
+        Spotify URI,Title,Album,Artist(s),Submitter ID,Created,Comment,Round ID,Visible To Voters
+        spotify:track:1,Title,Album,Artist,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        """,
+    )
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        spotify:track:1,id_a,2026-02-10T00:00:00Z,1,,r1
+        """,
+    )
+
+    result = generate.build_top_tracks(
+        votes_csv, submissions_csv, rounds_path, competitors, top_n=3
+    )
+
+    assert result[0]["round_name"] == "Round"
+
+
+# --- build_top_artists ---
+
+
+def test_build_top_artists_aggregates_points_by_artist(tmp_path):
+    submissions_csv = write_csv(
+        tmp_path,
+        "submissions.csv",
+        """
+        Spotify URI,Title,Album,Artist(s),Submitter ID,Created,Comment,Round ID,Visible To Voters
+        spotify:track:1,Song A,Album,Artist X,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        spotify:track:2,Song B,Album,Artist X,id_b,2026-02-10T00:00:00Z,,r1,Yes
+        spotify:track:3,Song C,Album,Artist Y,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        """,
+    )
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        spotify:track:1,id_b,2026-02-10T00:00:00Z,5,,r1
+        spotify:track:2,id_a,2026-02-10T00:00:00Z,4,,r1
+        spotify:track:3,id_b,2026-02-10T00:00:00Z,10,,r1
+        """,
+    )
+
+    result = generate.build_top_artists(votes_csv, submissions_csv, top_n=3)
+
+    assert len(result) == 2
+    # Artist Y: 10 pts (one track). Artist X: 5+4 = 9 pts (two tracks).
+    assert result[0]["artist"] == "Artist Y"
+    assert result[0]["points"] == 10
+    assert result[1]["artist"] == "Artist X"
+    assert result[1]["points"] == 9
+
+
+def test_build_top_artists_respects_top_n(tmp_path):
+    submissions_csv = write_csv(
+        tmp_path,
+        "submissions.csv",
+        """
+        Spotify URI,Title,Album,Artist(s),Submitter ID,Created,Comment,Round ID,Visible To Voters
+        spotify:track:1,Song A,Album,Artist A,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        spotify:track:2,Song B,Album,Artist B,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        spotify:track:3,Song C,Album,Artist C,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        """,
+    )
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        spotify:track:1,id_a,2026-02-10T00:00:00Z,10,,r1
+        spotify:track:2,id_a,2026-02-10T00:00:00Z,5,,r1
+        spotify:track:3,id_a,2026-02-10T00:00:00Z,1,,r1
+        """,
+    )
+
+    result = generate.build_top_artists(votes_csv, submissions_csv, top_n=2)
+
+    assert len(result) == 2
+    assert result[0]["artist"] == "Artist A"
+    assert result[0]["points"] == 10
+    assert result[1]["artist"] == "Artist B"
+    assert result[1]["points"] == 5
+
+
+def test_build_top_artists_empty_submissions_returns_empty(tmp_path):
+    submissions_csv = write_csv(
+        tmp_path,
+        "submissions.csv",
+        "Spotify URI,Title,Album,Artist(s),Submitter ID,Created,Comment,Round ID,Visible To Voters\n",
+    )
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        "Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID\n",
+    )
+
+    result = generate.build_top_artists(votes_csv, submissions_csv, top_n=3)
+
+    assert result == []
+
+
+def test_build_top_artists_tracks_with_zero_votes_included(tmp_path):
+    submissions_csv = write_csv(
+        tmp_path,
+        "submissions.csv",
+        """
+        Spotify URI,Title,Album,Artist(s),Submitter ID,Created,Comment,Round ID,Visible To Voters
+        spotify:track:1,Only Song,Album,Only Artist,id_a,2026-02-10T00:00:00Z,,r1,Yes
+        """,
+    )
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        "Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID\n",
+    )
+
+    result = generate.build_top_artists(votes_csv, submissions_csv, top_n=3)
+
+    assert len(result) == 1
+    assert result[0]["artist"] == "Only Artist"
+    assert result[0]["points"] == 0
+
+
 # --- build_html ---
 
 
