@@ -290,6 +290,9 @@ def build_html(
         flex-direction: column;
         gap: 8px;
         padding: 4px 2px 8px;
+        overflow-y: auto;
+        flex-shrink: 0;
+        -webkit-overflow-scrolling: touch;
       }}
 
       @media (max-width: 600px) {{
