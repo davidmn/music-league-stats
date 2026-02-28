@@ -228,6 +228,23 @@ def build_top_artists(
     return [{"artist": a, "points": p} for a, p in sorted_artists[:top_n]]
 
 
+def build_point_histogram(votes_path: Path) -> List[dict]:
+    """
+    Return histogram of point allocations across all votes: list of {points, count}
+    for each point value from 0 to max observed, in order.
+    """
+    counts: Dict[int, int] = defaultdict(int)
+    with votes_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            pts = int(row["Points Assigned"])
+            counts[pts] += 1
+    if not counts:
+        return []
+    max_pts = max(counts.keys())
+    return [{"points": p, "count": counts.get(p, 0)} for p in range(max_pts + 1)]
+
+
 def load_rounds(path: Path) -> List[tuple[str, str]]:
     """Return list of (round_id, round_name) sorted by Created."""
     rows: List[tuple[str, str, str]] = []
@@ -245,6 +262,7 @@ def build_html(
     matrix: List[List[int]] | None = None,
     top_tracks: List[dict] | None = None,
     top_artists: List[dict] | None = None,
+    point_histogram: List[dict] | None = None,
 ) -> str:
     # Sort most generous first by average points per vote, then by total points.
     voters_sorted = sorted(
@@ -278,6 +296,8 @@ def build_html(
         top_tracks = []
     if top_artists is None:
         top_artists = []
+    if point_histogram is None:
+        point_histogram = []
 
     # Minimal, self-contained HTML.
     html = f"""<!doctype html>
@@ -405,6 +425,14 @@ def build_html(
         .chart-container {{
           height: 380px;
         }}
+      }}
+
+      .chart-container.histogram-chart {{
+        height: auto;
+        max-height: 320px;
+        gap: 4px;
+        overflow-y: visible;
+        padding: 4px 2px 8px;
       }}
 
       .bar-row {{
@@ -666,6 +694,16 @@ def build_html(
         </div>
       </section>
 
+      <section class="card">
+        <div class="card-inner">
+          <h2>Point Allocation</h2>
+          <div class="chart-container histogram-chart" id="point-histogram"></div>
+          <p class="matrix-caption">
+            How many times each point value was given across the entire league.
+          </p>
+        </div>
+      </section>
+
       <footer class="page-footer">
         <a href="https://github.com/davidmn/music-league-stats" target="_blank" rel="noopener noreferrer">GitHub</a>
         <span class="credit">Made by MegaSlippers</span>
@@ -680,6 +718,7 @@ def build_html(
       const matrix = {json.dumps(matrix)};
       const topTracks = {json.dumps(top_tracks)};
       const topArtists = {json.dumps(top_artists)};
+      const pointHistogram = {json.dumps(point_histogram)};
 
       function renderChart() {{
         const container = document.getElementById("generosity-chart");
@@ -732,6 +771,45 @@ def build_html(
         if (!name) return "";
         if (name.length <= max) return name;
         return name.slice(0, max - 1) + "…";
+      }}
+
+      function renderPointHistogram() {{
+        const container = document.getElementById("point-histogram");
+        if (!container) return;
+
+        container.innerHTML = "";
+
+        if (!pointHistogram.length) {{
+          const empty = document.createElement("div");
+          empty.className = "muted";
+          empty.textContent = "No vote data available.";
+          container.appendChild(empty);
+          return;
+        }}
+
+        const maxCount = Math.max.apply(null, pointHistogram.map(function(d) {{ return d.count; }}));
+
+        pointHistogram.forEach(function(d) {{
+          const row = document.createElement("div");
+          row.className = "bar-row";
+          const nameEl = document.createElement("div");
+          nameEl.className = "bar-label";
+          nameEl.textContent = d.points + " pt" + (d.points === 1 ? "" : "s");
+          const track = document.createElement("div");
+          track.className = "bar-track";
+          const fill = document.createElement("div");
+          fill.className = "bar-fill";
+          const widthPct = maxCount > 0 ? (d.count / maxCount) * 100 : 0;
+          fill.style.width = widthPct.toFixed(1) + "%";
+          track.appendChild(fill);
+          const valueEl = document.createElement("div");
+          valueEl.className = "bar-value";
+          valueEl.textContent = String(d.count);
+          row.appendChild(nameEl);
+          row.appendChild(track);
+          row.appendChild(valueEl);
+          container.appendChild(row);
+        }});
       }}
 
       function renderTopTracks() {{
@@ -897,6 +975,7 @@ def build_html(
       }}
 
       renderChart();
+      renderPointHistogram();
       renderTopTracks();
       renderTopArtists();
       renderMatrix();
@@ -918,6 +997,7 @@ def main() -> None:
     matrix_names, matrix = build_vote_matrix(votes_csv, submissions_csv, competitors)
     top_tracks = build_top_tracks(votes_csv, submissions_csv, rounds_csv, competitors, top_n=3)
     top_artists = build_top_artists(votes_csv, submissions_csv, top_n=3)
+    point_histogram = build_point_histogram(votes_csv)
 
     html = build_html(
         voter_stats,
@@ -925,6 +1005,7 @@ def main() -> None:
         matrix,
         top_tracks=top_tracks,
         top_artists=top_artists,
+        point_histogram=point_histogram,
     )
     output_path = BASE_DIR / "index.html"
     output_path.write_text(html, encoding="utf-8")

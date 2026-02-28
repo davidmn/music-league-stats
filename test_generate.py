@@ -465,6 +465,88 @@ def test_build_top_artists_tracks_with_zero_votes_included(tmp_path):
     assert result[0]["points"] == 0
 
 
+# --- build_point_histogram ---
+
+
+def test_build_point_histogram_returns_counts_per_point_value(tmp_path):
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        track1,v1,2026-02-10T00:00:00Z,0,,r1
+        track2,v1,2026-02-10T00:00:00Z,0,,r1
+        track3,v1,2026-02-10T00:00:00Z,1,,r1
+        track4,v1,2026-02-10T00:00:00Z,2,,r1
+        track5,v1,2026-02-10T00:00:00Z,2,,r1
+        track6,v1,2026-02-10T00:00:00Z,2,,r1
+        track7,v1,2026-02-10T00:00:00Z,3,,r1
+        """,
+    )
+
+    result = generate.build_point_histogram(votes_csv)
+
+    assert len(result) == 4
+    assert result[0] == {"points": 0, "count": 2}
+    assert result[1] == {"points": 1, "count": 1}
+    assert result[2] == {"points": 2, "count": 3}
+    assert result[3] == {"points": 3, "count": 1}
+
+
+def test_build_point_histogram_includes_zero_counts_for_gaps(tmp_path):
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        track1,v1,2026-02-10T00:00:00Z,0,,r1
+        track2,v1,2026-02-10T00:00:00Z,4,,r1
+        """,
+    )
+
+    result = generate.build_point_histogram(votes_csv)
+
+    assert len(result) == 5
+    assert result[0] == {"points": 0, "count": 1}
+    assert result[1] == {"points": 1, "count": 0}
+    assert result[2] == {"points": 2, "count": 0}
+    assert result[3] == {"points": 3, "count": 0}
+    assert result[4] == {"points": 4, "count": 1}
+
+
+def test_build_point_histogram_empty_votes_returns_empty(tmp_path):
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        "Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID\n",
+    )
+
+    result = generate.build_point_histogram(votes_csv)
+
+    assert result == []
+
+
+def test_build_point_histogram_single_point_value(tmp_path):
+    votes_csv = write_csv(
+        tmp_path,
+        "votes.csv",
+        """
+        Spotify URI,Voter ID,Created,Points Assigned,Comment,Round ID
+        track1,v1,2026-02-10T00:00:00Z,2,,r1
+        track2,v1,2026-02-10T00:00:00Z,2,,r1
+        track3,v1,2026-02-10T00:00:00Z,2,,r1
+        """,
+    )
+
+    result = generate.build_point_histogram(votes_csv)
+
+    # Returns 0..max_pts, so 0, 1, 2 with counts 0, 0, 3
+    assert len(result) == 3
+    assert result[0] == {"points": 0, "count": 0}
+    assert result[1] == {"points": 1, "count": 0}
+    assert result[2] == {"points": 2, "count": 3}
+
+
 # --- build_html ---
 
 
